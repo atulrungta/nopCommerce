@@ -64,6 +64,7 @@ public partial class PdfService : IPdfService
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStoreContext _storeContext;
     protected readonly IStoreService _storeService;
+    protected readonly IThumbService _thumbService;
     protected readonly IVendorService _vendorService;
     protected readonly IWorkContext _workContext;
     protected readonly MeasureSettings _measureSettings;
@@ -100,6 +101,7 @@ public partial class PdfService : IPdfService
         IStateProvinceService stateProvinceService,
         IStoreContext storeContext,
         IStoreService storeService,
+        IThumbService thumbService,
         IVendorService vendorService,
         IWorkContext workContext,
         MeasureSettings measureSettings,
@@ -132,6 +134,7 @@ public partial class PdfService : IPdfService
         _storeContext = storeContext;
         _stateProvinceService = stateProvinceService;
         _storeService = storeService;
+        _thumbService = thumbService;
         _vendorService = vendorService;
         _workContext = workContext;
         _measureSettings = measureSettings;
@@ -205,6 +208,11 @@ public partial class PdfService : IPdfService
             addressResult.AddressAttributes = text.Split('\n').ToList();
         }
 
+        //billing address custom values
+        var customValues = new CustomValues();
+        customValues.FillByXml(order.CustomValuesXml, true);
+        addressResult.CustomValues.AddRange(customValues.Where(value => value.DisplayLocation == CustomValueDisplayLocation.BillingAddress));
+
         //vendors payment details
         if (vendor is null)
         {
@@ -218,10 +226,8 @@ public partial class PdfService : IPdfService
                 addressResult.PaymentMethod = paymentMethodStr;
             }
 
-            //custom values
-            var customValues = CommonHelper.DeserializeCustomValuesFromXml(order.CustomValuesXml);
-            if (customValues != null)
-                addressResult.CustomValues = customValues;
+            //payment custom values
+            addressResult.CustomValues.AddRange(customValues.Where(value => value.DisplayLocation == CustomValueDisplayLocation.Payment));
         }
 
         return addressResult;
@@ -317,7 +323,15 @@ public partial class PdfService : IPdfService
                     addressResult.Country = await _localizationService.GetLocalizedAsync(country, x => x.Name, lang.Id);
             }
 
+            //shipping address custom values
+            var customValues = new CustomValues();
+            customValues.FillByXml(order.CustomValuesXml, true);
+            addressResult.CustomValues.AddRange(customValues.Where(value => value.DisplayLocation == CustomValueDisplayLocation.ShippingAddress));
+
             addressResult.ShippingMethod = order.ShippingMethod;
+
+            //shipping custom values
+            addressResult.CustomValues.AddRange(customValues.Where(value => value.DisplayLocation == CustomValueDisplayLocation.Shipping));
         }
 
         return addressResult;
@@ -914,7 +928,9 @@ public partial class PdfService : IPdfService
 
                 foreach (var pic in pictures)
                 {
-                    var picPath = await _pictureService.GetThumbLocalPathAsync(pic, pdfSettingsByStore.ImageTargetSize, false);
+                    var (pictureUrl, _) = await _pictureService.GetPictureUrlAsync(pic, pdfSettingsByStore.ImageTargetSize, false);
+                    var picPath = await _thumbService.GetThumbLocalPathAsync(pictureUrl);
+
                     if (!string.IsNullOrEmpty(picPath))
                         picturePaths.Add(picPath);
                 }

@@ -111,6 +111,12 @@
         processing: @Model.Processing.ToString().ToLowerInvariant(),
     </text>
 }
+@if (Model.DeferLoading.HasValue)
+{
+    <text>
+    deferLoading: @Model.DeferLoading.ToString(),
+    </text>
+}
 @if (Model.ServerSide)
 {
     <text>
@@ -219,6 +225,10 @@ else
     </text>
 }
 scrollX: true,
+preDrawCallback: function (data) {
+    data.nTableWrapper.querySelectorAll('colgroup').forEach((e) => e.remove());
+},
+autoWidth: false,
 info: @Model.Info.ToString().ToLowerInvariant(),
 paging: @Model.Paging.ToString().ToLowerInvariant(),
 pagingType: '@Model.PagingType',
@@ -242,7 +252,7 @@ ordering: @Model.Ordering.ToString().ToLowerInvariant(),
     <text>
         buttons: [{
             name: 'refresh',
-            text: '<i class="fas fa-rotate" style="padding-left: 5px"></i>',
+            text: '<i class="fas fa-rotate" style="padding: 0px"></i>',
             action: function() {
                 @if (Model.ServerSide)
                 {

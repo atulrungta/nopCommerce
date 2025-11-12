@@ -758,7 +758,7 @@ public partial class OrderProcessingService : IOrderProcessingService
             ShippingStatus = details.ShippingStatus,
             ShippingMethod = details.ShippingMethodName,
             ShippingRateComputationMethodSystemName = details.ShippingRateComputationMethodSystemName,
-            CustomValuesXml = CommonHelper.SerializeCustomValuesToXml(processPaymentRequest.CustomValues),
+            CustomValuesXml = processPaymentRequest.CustomValues.SerializeToXml(),
             VatNumber = details.VatNumber,
             CreatedOnUtc = DateTime.UtcNow,
             CustomOrderNumber = string.Empty
@@ -1309,6 +1309,8 @@ public partial class OrderProcessingService : IOrderProcessingService
             //inventory
             await _productService.AdjustInventoryAsync(product, -sc.Quantity, sc.AttributesXml,
                 string.Format(await _localizationService.GetResourceAsync("Admin.StockQuantityHistory.Messages.PlaceOrder"), order.Id));
+
+            await _eventPublisher.PublishAsync(new ShoppingCartItemMovedToOrderItemEvent(sc, orderItem));
         }
 
         await _shoppingCartService.ClearShoppingCartAsync(details.Customer, order.StoreId);
@@ -1851,9 +1853,10 @@ public partial class OrderProcessingService : IOrderProcessingService
                 InitialOrder = initialOrder,
                 RecurringCycleLength = recurringPayment.CycleLength,
                 RecurringCyclePeriod = recurringPayment.CyclePeriod,
-                RecurringTotalCycles = recurringPayment.TotalCycles,
-                CustomValues = CommonHelper.DeserializeCustomValuesFromXml(initialOrder.CustomValuesXml)
+                RecurringTotalCycles = recurringPayment.TotalCycles
             };
+
+            processPaymentRequest.CustomValues.FillByXml(initialOrder.CustomValuesXml);
 
             //prepare order details
             var details = await PrepareRecurringOrderDetailsAsync(processPaymentRequest);
@@ -2329,6 +2332,11 @@ public partial class OrderProcessingService : IOrderProcessingService
 
         //cancel order
         await SetOrderStatusAsync(order, OrderStatus.Cancelled, notifyCustomer);
+
+        //notify store owner
+        var currentCustomer = await _workContext.GetCurrentCustomerAsync();
+        if (order.CustomerId == currentCustomer.Id)
+            await _workflowMessageService.SendOrderCancelledStoreOwnerNotificationAsync(order, _localizationSettings.DefaultAdminLanguageId);
 
         //add a note
         await AddOrderNoteAsync(order, "Order has been cancelled");
@@ -3258,8 +3266,9 @@ public partial class OrderProcessingService : IOrderProcessingService
     /// Sets process payment request
     /// </summary>
     /// <param name="processPaymentRequest">Process payment request. Pass null for delete</param>
+    /// <param name="useNewOrderGuid">Whether to use new order GUID; pass false to set GUID according to PaymentSettings.RegenerateOrderGuidInterval value</param>
     /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task SetProcessPaymentRequestAsync(ProcessPaymentRequest processPaymentRequest)
+    public virtual async Task SetProcessPaymentRequestAsync(ProcessPaymentRequest processPaymentRequest, bool useNewOrderGuid = false)
     {
         var customer = await _workContext.GetCurrentCustomerAsync();
         var store = await _storeContext.GetCurrentStoreAsync();
@@ -3271,7 +3280,7 @@ public partial class OrderProcessingService : IOrderProcessingService
             return;
         }
 
-        if (_paymentSettings.RegenerateOrderGuidInterval > 0)
+        if (_paymentSettings.RegenerateOrderGuidInterval > 0 && !useNewOrderGuid)
         {
             //we should use the same GUID for multiple payment attempts
             //this way a payment gateway can prevent security issues such as credit card brute-force attacks
